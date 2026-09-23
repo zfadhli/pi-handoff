@@ -9,10 +9,10 @@
  *   /handoff now implement this for teams as well
  *   /handoff execute phase one of the plan
  *
- * Rewrite of @nicknisi/pi-handoff 0.1.8 for pi >= 0.87: post-switch UI work
- * runs inside `newSession({ withSession })` because pre-replacement `ctx` is
- * invalidated (stale-ctx ops now throw), generation uses the documented
- * `ctx.modelRegistry.complete()`, and the branch is read compaction-aware.
+ * Post-switch UI work runs inside `newSession({ withSession })`: pre-replacement
+ * `ctx` is invalidated after a session switch and throws on use. Generation uses
+ * `ctx.modelRegistry.complete()`, and the branch is read compaction-aware via
+ * `buildContextEntries()` so compacted sessions hand off real context.
  */
 
 import { type Message, uuidv7 } from '@earendil-works/pi-ai'
