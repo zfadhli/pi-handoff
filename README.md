@@ -11,15 +11,23 @@ Transfer context from the current session into a new, focused one.
 ## Install
 
 ```bash
-pi install npm:pi-handoff
+pi install git:github.com/zfadhli/pi-handoff
 ```
 
-Or from source:
+Pin a tag or commit for reproducible installs:
+
+```bash
+pi install git:github.com/zfadhli/pi-handoff@v0.2.0
+```
+
+Or clone and install locally:
 
 ```bash
 git clone git@github.com:zfadhli/pi-handoff.git
 pi install /path/to/pi-handoff
 ```
+
+Not published to npm.
 
 Requires pi >= 0.87.
 
