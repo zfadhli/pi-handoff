@@ -11,10 +11,13 @@
   "type": "module",
   "files": [
     "index.ts",
+    "logic.ts",
     "README.md"
   ],
   "scripts": {
-    "test": "node --test tests/*.test.ts"
+    "test": "node --test tests/*.test.ts",
+    "format": "biome format --write .",
+    "format:check": "biome format ."
   },
   "pi": {
     "extensions": [
@@ -25,5 +28,8 @@
     "@earendil-works/pi-agent-core": "*",
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14"
   }
 }
