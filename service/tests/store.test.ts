@@ -8,6 +8,7 @@ import { createModels } from '@earendil-works/pi-ai/models'
 import {
   fauxAssistantMessage,
   fauxProvider,
+  fauxText,
   type FauxResponseFactory,
 } from '@earendil-works/pi-ai/providers/faux'
 import { buildHandoffSettings, HandoffStore, OPENCODE_SESSION_HEADER } from '../store.ts'
@@ -194,6 +195,61 @@ test('wait surfaces detail when the durable submission carries it', async () => 
       )
     } finally {
       await store.close()
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('multi-text-block answers join with newline', async () => {
+  const { dir, storePath } = await tempStorePath()
+  const { faux, models, model } = testModels()
+  try {
+    faux.setResponses([fauxAssistantMessage([fauxText('FIRST'), fauxText('SECOND')])])
+    const store = await HandoffStore.open({ models, storePath })
+    try {
+      const { id } = await store.submit({ requestId: 'req-multiblock', content: 'x', model })
+      const result = await store.wait(id)
+      assert.equal(result.status, 'done')
+      assert.equal(result.status === 'done' ? result.text : undefined, 'FIRST\nSECOND')
+    } finally {
+      await store.close()
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('same requestId after close + reopen returns existing ids with no second model call', async () => {
+  const { dir, storePath } = await tempStorePath()
+  const { faux, models, model } = testModels()
+  try {
+    faux.setResponses([fauxAssistantMessage('DURABLE TEXT')])
+    const store = await HandoffStore.open({ models, storePath })
+    const first = await store.submit({ requestId: 'durable-dup', content: 'make handoff', model })
+    const waited = await store.wait(first.id)
+    assert.equal(waited.status, 'done')
+    assert.equal(faux.state.callCount, 1)
+    await store.close()
+
+    const reopened = await HandoffStore.open({ models, storePath })
+    try {
+      await reopened.resume()
+      const second = await reopened.submit({
+        requestId: 'durable-dup',
+        content: 'make handoff',
+        model,
+      })
+      assert.equal(second.id, first.id)
+      assert.equal(second.conversationId, first.conversationId)
+      const items = await reopened.list()
+      assert.equal(items.length, 1)
+      assert.equal(faux.state.callCount, 1)
+      const again = await reopened.wait(second.id)
+      assert.equal(again.status, 'done')
+      assert.equal(again.status === 'done' ? again.text : undefined, 'DURABLE TEXT')
+    } finally {
+      await reopened.close()
     }
   } finally {
     await rm(dir, { recursive: true, force: true })

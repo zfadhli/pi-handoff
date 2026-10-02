@@ -58,7 +58,7 @@ Exit codes: `0` on success; `submit` exits `1` when the generation settles unans
 The session JSONL is parsed with the compaction-aware parser (`session-context.ts`): only the active branch path is kept, post-compaction entries plus the compaction summary are used, and content blocks are rendered to text the same way pi serializes conversations. The transcript and goal are assembled into a generation request from the shared `SYSTEM_PROMPT` (`../logic.ts`), and generation runs as a durable task in the SQLite-backed harness. Each conversation commits a `handoff.request` entry with the session file, goal, and timestamp, so `list` and `result` work after the store is reopened.
 
 > [!NOTE]
-> `submit` is idempotent per session file + goal: resubmitting the same pair returns the existing conversation instead of generating twice.
+> `submit` is idempotent per session file + goal, including across restarts: resubmitting the same pair returns the existing conversation instead of generating twice (the `requestId` index lives in the durable `handoff.request` entries, and `list` pages through every conversation regardless of count).
 
 ## Limitations
 

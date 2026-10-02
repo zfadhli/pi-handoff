@@ -173,3 +173,38 @@ test('unknown conversationId → result is pending', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('list pages through all conversations with a small page size', async () => {
+  const { dir, storePath } = await tempStorePath()
+  const { faux, models, model } = testModels()
+  try {
+    faux.setResponses([
+      fauxAssistantMessage('P1'),
+      fauxAssistantMessage('P2'),
+      fauxAssistantMessage('P3'),
+    ])
+    const store = await HandoffStore.open({ models, storePath, scanPageSize: 1 })
+    try {
+      for (const n of ['page-a', 'page-b', 'page-c']) {
+        const { id } = await store.submit({
+          requestId: n,
+          content: n,
+          model,
+          meta: { sessionFile: `${n}.md`, goal: `goal ${n}` },
+        })
+        await store.wait(id)
+      }
+      const items = await store.list()
+      assert.equal(items.length, 3)
+      assert.deepEqual(items.map((item) => item.goal).sort(), [
+        'goal page-a',
+        'goal page-b',
+        'goal page-c',
+      ])
+    } finally {
+      await store.close()
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

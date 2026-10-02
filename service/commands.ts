@@ -218,7 +218,7 @@ async function runResume(
 export async function runCli(argv: string[], deps: CliDeps = {}): Promise<number> {
   const out = deps.stdout ?? ((s: string) => process.stdout.write(`${s}\n`))
   const err = deps.stderr ?? ((s: string) => process.stderr.write(`${s}\n`))
-  if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) {
+  if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
     out(USAGE)
     return 0
   }

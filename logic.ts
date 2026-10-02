@@ -3,7 +3,7 @@
  * extension alias resolution.
  */
 
-import type { SessionHeader } from '@earendil-works/pi-coding-agent'
+import type { ExtensionCommandContext, SessionHeader } from '@earendil-works/pi-coding-agent'
 
 export const SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
 
@@ -49,4 +49,27 @@ export function sessionHistorySection(chain: string[]): string {
   return `\n\n## Session History\nPrevious sessions (most recent first):\n${chain
     .map((s, i) => `${i + 1}. ${s}`)
     .join('\n')}\n\nUse \`pi --session <path>\` to review any session if needed.`
+}
+
+type NewSessionOptions = NonNullable<Parameters<ExtensionCommandContext['newSession']>[0]>
+
+/** Pure constructor for the object passed to `ctx.newSession(...)` after a handoff. */
+export function buildHandoffSession({
+  parentSession,
+  goal,
+  prompt,
+}: {
+  parentSession: string | undefined
+  goal: string
+  prompt: string
+}): NewSessionOptions {
+  return {
+    parentSession,
+    setup: async (sessionManager) => {
+      sessionManager.appendCustomMessageEntry('handoff', prompt, true, { goal })
+    },
+    withSession: async (replacementCtx) => {
+      replacementCtx.ui.notify('Handoff ready. Type your next instruction.', 'info')
+    },
+  }
 }

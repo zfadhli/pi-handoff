@@ -23,7 +23,12 @@ import {
   serializeConversation,
   sessionEntryToContextMessages,
 } from '@earendil-works/pi-coding-agent'
-import { SYSTEM_PROMPT, collectSessionChain, sessionHistorySection } from './logic.js'
+import {
+  SYSTEM_PROMPT,
+  buildHandoffSession,
+  collectSessionChain,
+  sessionHistorySection,
+} from './logic.js'
 
 export default function handoff(pi: ExtensionAPI): void {
   pi.registerCommand('handoff', {
@@ -142,15 +147,9 @@ export default function handoff(pi: ExtensionAPI): void {
       pi.appendEntry('handoff', { goal, prompt: editedPrompt })
 
       // ctx is stale after the switch: post-switch UI work runs in withSession.
-      const newSessionResult = await ctx.newSession({
-        parentSession: currentSessionFile,
-        setup: async (sessionManager) => {
-          sessionManager.appendCustomMessageEntry('handoff', editedPrompt, true, { goal })
-        },
-        withSession: async (replacementCtx) => {
-          replacementCtx.ui.notify('Handoff ready. Type your next instruction.', 'info')
-        },
-      })
+      const newSessionResult = await ctx.newSession(
+        buildHandoffSession({ parentSession: currentSessionFile, goal, prompt: editedPrompt }),
+      )
 
       if (newSessionResult.cancelled) {
         ctx.ui.notify('New session cancelled', 'info')

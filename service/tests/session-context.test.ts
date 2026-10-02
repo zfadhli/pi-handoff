@@ -55,7 +55,8 @@ test('pi-written compaction fixture: summary first, kept range, post-compaction 
     { role: 'user', text: 'Reply with exactly: second turn done' },
     { role: 'assistant', text: 'second turn done' },
     { role: 'user', text: 'Reply with exactly: after compaction' },
-    { role: 'assistant', text: ' \nafter compaction' },
+    { role: 'assistantThinking', text: ' ' },
+    { role: 'assistant', text: 'after compaction' },
   ])
   assert.ok(!messages.some((m) => m.text.includes('Reply with exactly: hello fixture')))
 })
@@ -63,9 +64,34 @@ test('pi-written compaction fixture: summary first, kept range, post-compaction 
 test('string and array content render; image blocks are ignored', () => {
   assert.deepEqual(buildSessionContext(fixture('content-shapes.jsonl')), [
     { role: 'user', text: 'plain string' },
-    { role: 'user', text: 'a\nb' },
-    { role: 'assistant', text: 'checking\nread' },
+    // pi contentText joins user text blocks with ""
+    { role: 'user', text: 'ab' },
+    { role: 'assistant', text: 'checking' },
+    { role: 'assistantToolCalls', text: 'read(path="f")' },
     { role: 'toolResult', text: 'file contents' },
+  ])
+})
+
+test('bashExecution entries render as user text; excluded runs are dropped', () => {
+  assert.deepEqual(buildSessionContext(fixture('bash-execution.jsonl')), [
+    { role: 'user', text: 'Check disk usage' },
+    { role: 'user', text: 'Ran `df -h`\n```\nFilesystem Size\n```' },
+    {
+      role: 'user',
+      text: 'Ran `sleep 60`\n```\npartial\n```\n\n(command cancelled)\n\n[Output truncated. Full output: /tmp/out.log]',
+    },
+    { role: 'user', text: 'Ran `failing`\n(no output)\n\nCommand exited with code 2' },
+    { role: 'assistant', text: 'Done' },
+  ])
+})
+
+test('assistant thinking, text, and tool calls split; multi-text joins with ""', () => {
+  assert.deepEqual(buildSessionContext(fixture('assistant-rich.jsonl')), [
+    { role: 'user', text: 'Hello world' },
+    { role: 'assistantThinking', text: 'plan: read then edit\nalso check tests' },
+    { role: 'assistant', text: "I'll start.\nReading now." },
+    { role: 'assistantToolCalls', text: 'read(path="a.ts"); edit(path="a.ts", edits=2, tag="x")' },
+    { role: 'toolResult', text: 'line1line2' },
   ])
 })
 

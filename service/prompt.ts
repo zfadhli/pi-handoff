@@ -1,9 +1,12 @@
 import { SYSTEM_PROMPT } from '../logic.ts'
 import type { SessionContextMessage } from './session-context.ts'
 
-// Mirrors pi-coding-agent@1.0.0 dist/core/compaction/utils.js: serializeConversation
-// after convertToLlm. Custom/branch/compaction summaries arrive as user text
-// (prefixes already applied by session-context.ts); tool results truncate at 2000 chars.
+// Mirrors pi-coding-agent@1.0.0 dist/core/compaction/utils.js serializeConversation
+// after convertToLlm: separate [Assistant thinking] / [Assistant] /
+// [Assistant tool calls] parts. Custom/branch/compaction summaries arrive as
+// user text (prefixes already applied by session-context.ts); tool results
+// truncate at 2000 chars. Empty user/tool-result text is skipped like pi's
+// falsy-content check; assistant parts are emitted as given.
 const TOOL_RESULT_MAX_CHARS = 2000
 
 function truncateForSummary(text: string, maxChars: number): string {
@@ -14,16 +17,20 @@ function truncateForSummary(text: string, maxChars: number): string {
 export function serializeMessages(messages: SessionContextMessage[]): string {
   const parts: string[] = []
   for (const msg of messages) {
-    if (!msg.text) continue
     if (
       msg.role === 'user' ||
       msg.role === 'custom' ||
       msg.role === 'branchSummary' ||
       msg.role === 'compactionSummary'
     ) {
+      if (!msg.text) continue
       parts.push(`[User]: ${msg.text}`)
+    } else if (msg.role === 'assistantThinking') {
+      parts.push(`[Assistant thinking]: ${msg.text}`)
     } else if (msg.role === 'assistant') {
       parts.push(`[Assistant]: ${msg.text}`)
+    } else if (msg.role === 'assistantToolCalls') {
+      parts.push(`[Assistant tool calls]: ${msg.text}`)
     } else if (msg.role === 'toolResult') {
       parts.push(`[Tool result]: ${truncateForSummary(msg.text, TOOL_RESULT_MAX_CHARS)}`)
     }

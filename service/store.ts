@@ -9,6 +9,8 @@ import {
   Harness,
   ROOT_CONVERSATION_ID,
   type ConversationId,
+  type ConversationRecord,
+  type Cursor,
   type SubmissionId,
   type SubmissionRecord,
 } from '@earendil-works/pi-durable'
@@ -81,7 +83,7 @@ function renderAssistantText(model: readonly { content?: unknown }[] | undefined
         (block as { type?: unknown }).type === 'text',
     )
     .map((block) => block.text)
-    .join('')
+    .join('\n')
 }
 
 function deriveStatus(submission: SubmissionRecord | undefined): 'pending' | 'done' | 'unanswered' {
@@ -95,11 +97,13 @@ export class HandoffStore {
   readonly sessionId: string
   private readonly context: Context
   private readonly seen = new Map<string, { id: SubmissionId; conversationId: ConversationId }>()
+  private readonly scanPageSize: number
 
-  private constructor(harness: Harness, context: Context, sessionId: string) {
+  private constructor(harness: Harness, context: Context, sessionId: string, scanPageSize: number) {
     this.harness = harness
     this.context = context
     this.sessionId = sessionId
+    this.scanPageSize = scanPageSize
   }
 
   static async open(options: {
@@ -107,9 +111,14 @@ export class HandoffStore {
     storePath: string
     context?: Context
     sessionId?: string
+    scanPageSize?: number
   }): Promise<HandoffStore> {
     const context = options.context ?? BACKGROUND_CONTEXT
     const sessionId = options.sessionId ?? randomUUID()
+    const scanPageSize =
+      options.scanPageSize !== undefined && options.scanPageSize >= 1
+        ? Math.floor(options.scanPageSize)
+        : 100
     const storage = await openNodeSqliteStorage(options.storePath)
     const harness = await Harness.open(
       storage,
@@ -120,7 +129,7 @@ export class HandoffStore {
       },
       context,
     )
-    return new HandoffStore(harness, context, sessionId)
+    return new HandoffStore(harness, context, sessionId, scanPageSize)
   }
 
   async submit(
@@ -128,6 +137,11 @@ export class HandoffStore {
   ): Promise<{ id: SubmissionId; conversationId: ConversationId }> {
     const cached = this.seen.get(request.requestId)
     if (cached !== undefined) return cached
+    const durable = await this.findByRequestId(request.requestId)
+    if (durable !== undefined) {
+      this.seen.set(request.requestId, durable)
+      return durable
+    }
     const conversation = await this.harness.createConversation(
       {
         ownership: { kind: 'ownerless' },
@@ -139,21 +153,19 @@ export class HandoffStore {
       { type: 'input', content: request.content, requestId: request.requestId },
       this.context,
     )
-    if (request.meta !== undefined) {
-      const meta = request.meta
-      await conversation.commit(
-        (tx) =>
-          tx.appendEntry(RequestEntry, conversation.id, {
-            data: {
-              sessionFile: meta.sessionFile,
-              goal: meta.goal,
-              createdAt: Date.now(),
-              requestId: request.requestId,
-            },
-          }),
-        this.context,
-      )
-    }
+    // Always persisted: the requestId index for restart-proof dedup lives in this entry.
+    await conversation.commit(
+      (tx) =>
+        tx.appendEntry(RequestEntry, conversation.id, {
+          data: {
+            sessionFile: request.meta?.sessionFile ?? '',
+            goal: request.meta?.goal ?? '',
+            createdAt: Date.now(),
+            requestId: request.requestId,
+          },
+        }),
+      this.context,
+    )
     const result = { id: submission.id, conversationId: conversation.id }
     this.seen.set(request.requestId, result)
     return result
@@ -180,10 +192,54 @@ export class HandoffStore {
     return { status: 'done', text: renderAssistantText(entry.model) }
   }
 
+  private async scanAllConversations(): Promise<ConversationRecord[]> {
+    const records: ConversationRecord[] = []
+    let cursor: Cursor | undefined = undefined
+    for (;;) {
+      const page = await this.harness.commit(
+        (tx) => tx.scanConversations({}, this.scanPageSize, cursor),
+        this.context,
+      )
+      records.push(...page.items)
+      if (page.next === undefined) break
+      cursor = page.next
+    }
+    return records
+  }
+
+  private async findByRequestId(
+    requestId: string,
+  ): Promise<{ id: SubmissionId; conversationId: ConversationId } | undefined> {
+    for (const record of await this.scanAllConversations()) {
+      if (record.id === ROOT_CONVERSATION_ID) continue
+      const match = await this.harness.commit(async (tx) => {
+        let cursor: Cursor | undefined = undefined
+        for (;;) {
+          const entries = await tx.scanEntries(
+            { conversationId: record.id },
+            this.scanPageSize,
+            cursor,
+          )
+          const request = entries.items.find((entry) => RequestEntry.is(entry))
+          if (request !== undefined && request.data.requestId === requestId) {
+            const submission = await tx.submissionByRequest(record.id, requestId)
+            return submission === undefined
+              ? undefined
+              : { id: submission.id, conversationId: record.id }
+          }
+          if (request !== undefined || entries.next === undefined) return undefined
+          cursor = entries.next
+        }
+      }, this.context)
+      if (match !== undefined) return match
+    }
+    return undefined
+  }
+
   async list(): Promise<HandoffListItem[]> {
-    const page = await this.harness.commit((tx) => tx.scanConversations({}, 100), this.context)
+    const records = await this.scanAllConversations()
     const items: HandoffListItem[] = []
-    for (const record of page.items) {
+    for (const record of records) {
       if (record.id === ROOT_CONVERSATION_ID) continue
       const { meta, submission } = await this.readRequest(record.id)
       items.push({

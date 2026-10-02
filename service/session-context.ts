@@ -1,17 +1,26 @@
 import { readFile } from 'node:fs/promises'
 
 export interface SessionContextMessage {
-  role: 'user' | 'assistant' | 'toolResult' | 'custom' | 'branchSummary' | 'compactionSummary'
+  role:
+    | 'user'
+    | 'assistant'
+    | 'assistantThinking'
+    | 'assistantToolCalls'
+    | 'toolResult'
+    | 'custom'
+    | 'branchSummary'
+    | 'compactionSummary'
   text: string
 }
 
-// Rendering: pi's serializeConversation collapses everything into one
-// `[User]: ...` / `[Assistant]: ...` / `[Tool result]: ...` string (with the
-// summary prefixes below via convertToLlm). We instead keep one {role, text}
-// per message so the handoff prompt can format the transcript; text
-// extraction mirrors contentText (text blocks joined with "\n", images
-// dropped), plus thinking blocks by their text and toolCall blocks by tool
-// name. Prefixes copied verbatim from pi-coding-agent's messages.js.
+// Rendering mirrors pi-coding-agent's convertToLlm + serializeConversation
+// (dist/core/messages.js + dist/core/compaction/utils.js): one
+// SessionContextMessage per serialized part. User/toolResult/custom text
+// blocks join with "" (contentText sep), assistant text blocks with "\n",
+// thinking blocks emit a separate part joined with "\n", toolCall blocks
+// emit `name(k=JSON(v), ...)` joined with "; ". bashExecution entries render
+// via bashExecutionToText as user text. Prefixes copied verbatim from pi's
+// messages.js.
 const COMPACTION_SUMMARY_PREFIX =
   'The conversation history before this point was compacted into the following summary:\n\n<summary>\n'
 const COMPACTION_SUMMARY_SUFFIX = '\n</summary>'
@@ -21,49 +30,125 @@ const BRANCH_SUMMARY_SUFFIX = '</summary>'
 
 type Entry = Record<string, any>
 
-function renderContent(content: unknown): string {
+// pi pi-ai contentText: string passes through; only text blocks kept, images
+// and unknown blocks dropped.
+function contentText(content: unknown, separator: string): string {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''
   const parts: string[] = []
   for (const block of content) {
-    if (!block || typeof block !== 'object') continue
-    if (block.type === 'text') {
+    if (block && typeof block === 'object' && block.type === 'text') {
       if (typeof block.text === 'string') parts.push(block.text)
-    } else if (block.type === 'thinking') {
-      if (typeof block.text === 'string') parts.push(block.text)
-      else if (typeof block.thinking === 'string') parts.push(block.thinking)
-    } else if (block.type === 'toolCall') {
-      if (typeof block.name === 'string') parts.push(block.name)
     }
-    // image and unknown blocks contribute nothing
   }
-  return parts.join('\n')
+  return parts.join(separator)
+}
+
+// pi messages.js bashExecutionToText, verbatim.
+function bashExecutionToText(msg: Entry): string {
+  let text = `Ran \`${msg.command}\`\n`
+  if (msg.output) {
+    text += `\`\`\`\n${msg.output}\n\`\`\``
+  } else {
+    text += '(no output)'
+  }
+  if (msg.cancelled) {
+    text += '\n\n(command cancelled)'
+  } else if (msg.exitCode !== null && msg.exitCode !== undefined && msg.exitCode !== 0) {
+    text += `\n\nCommand exited with code ${msg.exitCode}`
+  }
+  if (msg.truncated && msg.fullOutputPath) {
+    text += `\n\n[Output truncated. Full output: ${msg.fullOutputPath}]`
+  }
+  return text
+}
+
+// pi serializeConversation assistant branch: thinking parts, text part (only
+// when a text block exists), tool-call parts with JSON args.
+function renderAssistant(content: unknown): SessionContextMessage[] {
+  if (typeof content === 'string') return content ? [{ role: 'assistant', text: content }] : []
+  if (!Array.isArray(content)) return []
+  const thinkingParts: string[] = []
+  const toolCalls: string[] = []
+  let hasText = false
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue
+    if (block.type === 'thinking') {
+      thinkingParts.push(block.thinking)
+    } else if (block.type === 'toolCall') {
+      const args =
+        block.arguments != null && typeof block.arguments === 'object' ? block.arguments : {}
+      const argsStr = Object.entries(args)
+        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+        .join(', ')
+      if (typeof block.name === 'string') toolCalls.push(`${block.name}(${argsStr})`)
+    } else if (block.type === 'text') {
+      hasText = true
+    }
+  }
+  const out: SessionContextMessage[] = []
+  if (thinkingParts.length > 0)
+    out.push({ role: 'assistantThinking', text: thinkingParts.join('\n') })
+  if (hasText) out.push({ role: 'assistant', text: contentText(content, '\n') })
+  if (toolCalls.length > 0) out.push({ role: 'assistantToolCalls', text: toolCalls.join('; ') })
+  return out
 }
 
 function entryMessages(entry: Entry, edit: Entry | undefined): SessionContextMessage[] {
   if (entry.type === 'message') {
     const message = entry.message ?? {}
     if (message.role === 'system') return []
-    if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'toolResult') {
-      return []
-    }
+    // pi projectContextEntry: null replacement drops; other roles keep their
+    // content except user/assistant/toolResult/custom, whose content is
+    // replaced (string replacement wraps for assistant/toolResult).
+    let effective = message
     if (edit) {
       if (edit.replacement === null) return []
-      const content = edit.replacement?.content
-      const wrapped =
-        typeof content === 'string' && message.role !== 'user'
-          ? [{ type: 'text', text: content }]
-          : content
-      return [{ role: message.role, text: renderContent(wrapped) }]
+      if (
+        message.role === 'user' ||
+        message.role === 'assistant' ||
+        message.role === 'toolResult' ||
+        message.role === 'custom'
+      ) {
+        const content =
+          (message.role === 'assistant' || message.role === 'toolResult') &&
+          typeof edit.replacement?.content === 'string'
+            ? [{ type: 'text', text: edit.replacement.content }]
+            : edit.replacement?.content
+        effective = { ...message, content }
+      }
     }
-    return [{ role: message.role, text: renderContent(message.content) }]
+    switch (effective.role) {
+      case 'user': {
+        const text = contentText(effective.content, '')
+        return text ? [{ role: 'user', text }] : []
+      }
+      case 'assistant':
+        return renderAssistant(effective.content)
+      case 'toolResult': {
+        const text = contentText(effective.content, '')
+        return text ? [{ role: 'toolResult', text }] : []
+      }
+      case 'custom': {
+        const text = contentText(effective.content, '')
+        return text ? [{ role: 'custom', text }] : []
+      }
+      case 'bashExecution': {
+        if (effective.excludeFromContext) return []
+        return [{ role: 'user', text: bashExecutionToText(effective) }]
+      }
+      default:
+        return []
+    }
   }
   if (entry.type === 'custom_message') {
     if (edit) {
       if (edit.replacement === null) return []
-      return [{ role: 'custom', text: renderContent(edit.replacement?.content) }]
+      const text = contentText(edit.replacement?.content, '')
+      return text ? [{ role: 'custom', text }] : []
     }
-    return [{ role: 'custom', text: renderContent(entry.content) }]
+    const text = contentText(entry.content, '')
+    return text ? [{ role: 'custom', text }] : []
   }
   if (entry.type === 'branch_summary' && typeof entry.summary === 'string') {
     return [
@@ -123,7 +208,9 @@ export function buildSessionContext(jsonl: string): SessionContextMessage[] {
     selected = kept
   }
   const edits = new Map<string, Entry>()
-  for (const entry of path) {
+  // pi buildSessionProjection collects edits from the compaction-filtered
+  // context entries, not the raw path.
+  for (const entry of selected) {
     if (entry.type === 'context_edit' && typeof entry.targetId === 'string') {
       edits.set(entry.targetId, entry)
     }

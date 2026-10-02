@@ -273,3 +273,33 @@ test('result unanswered prints reason and detail on stderr', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('result <id> -h still executes result instead of printing help', async () => {
+  const { dir, storePath } = await setup()
+  const { faux, models } = testModels()
+  try {
+    const session = await writeSessionFile(dir, 's.jsonl')
+    faux.setResponses([fauxAssistantMessage('DASH H TEXT')])
+    const detachCap = capture()
+    const detachCode = await runCli(
+      ['submit', '--session', session, '--goal', 'dash h', '--provider', 'faux', '--detach'],
+      { models, storePath, ...detachCap.deps },
+    )
+    assert.equal(detachCode, 0)
+    const { conversationId } = JSON.parse(detachCap.stdout.join('\n')) as {
+      conversationId: number
+    }
+    const resumeCap = capture()
+    assert.equal(await runCli(['resume'], { models, storePath, ...resumeCap.deps }), 0)
+    const cap = capture()
+    const code = await runCli(['result', `${conversationId}`, '-h'], {
+      models,
+      storePath,
+      ...cap.deps,
+    })
+    assert.equal(code, 0)
+    assert.match(cap.stdout.join('\n'), /DASH H TEXT/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
