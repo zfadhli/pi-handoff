@@ -1,0 +1,5 @@
+{"type":"session","version":3,"id":"s1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/repo"}
+{"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"q"}}
+{"type":"branch_summary","id":"b1","parentId":"u1","timestamp":"2026-01-01T00:00:02.000Z","fromId":"u1","summary":"branch recap"}
+{"type":"label","id":"l1","parentId":"b1","timestamp":"2026-01-01T00:00:03.000Z","targetId":"u1","label":"mark"}
+{"type":"message","id":"a1","parentId":"l1","timestamp":"2026-01-01T00:00:04.000Z","message":{"role":"assistant","content":[{"type":"text","text":"a"}]}}

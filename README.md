@@ -83,6 +83,10 @@ Formatting is [Biome](https://biomejs.dev): 2-space indent, single quotes, semic
 biome format --write .
 ```
 
+## Standalone service
+
+`service/` is a headless, durable handoff prompt generator: one request is one SQLite-backed conversation that survives the pi process exiting. It is generate-only (no review UI, no session creation) and takes a session file plus a goal over its CLI. See [service/README.md](service/README.md) for install, credentials, and the command reference.
+
 ## Layout
 
 ```

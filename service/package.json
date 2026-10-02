@@ -1,0 +1,22 @@
+{
+  "name": "pi-handoff-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone durable handoff prompt generator (uses @earendil-works/pi-durable)",
+  "bin": {
+    "pi-handoff": "./bin/pi-handoff.mjs"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.ts",
+    "cli": "node --experimental-strip-types cli.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-durable": "1.0.0",
+    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/chord": "1.0.0"
+  }
+}

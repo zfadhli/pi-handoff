@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"s1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/repo"}
+{"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"first question"}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-01-01T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"first answer"}]}}
+{"type":"compaction","id":"c1","parentId":"a1","timestamp":"2026-01-01T00:00:03.000Z","summary":"early chat recap","firstKeptEntryId":"u2","tokensBefore":100}
+{"type":"message","id":"u2","parentId":"c1","timestamp":"2026-01-01T00:00:04.000Z","message":{"role":"user","content":"later question"}}
+{"type":"message","id":"a2","parentId":"u2","timestamp":"2026-01-01T00:00:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"later answer"}]}}
