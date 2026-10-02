@@ -6,7 +6,7 @@ Transfer context from the current session into a new, focused one.
 /handoff <goal for the new thread>
 ```
 
-`/handoff` reads the active branch, summarizes what matters for the task you name, and drops the result into a fresh session as an editable draft. Compaction is lossy; handoff is a deliberate, reviewable prompt you can edit before the next agent sees it.
+`/handoff` reads the active branch, summarizes what matters for the task you name, and commits the result into a fresh session as a visible custom message. Compaction is lossy; handoff is a deliberate, reviewable prompt you can edit before the next agent sees it.
 
 ## Install
 
@@ -29,7 +29,7 @@ pi install /path/to/pi-handoff
 
 Not published to npm.
 
-Requires pi >= 0.87.
+Requires pi >= 1.0.0.
 
 ## Usage
 
@@ -37,7 +37,7 @@ Requires pi >= 0.87.
 2. The extension reads the compaction-aware branch and serializes it.
 3. The current model streams a handoff prompt behind an abortable loader.
 4. The prompt opens in an editor overlay — edit or accept.
-5. A new session is created, linked to the previous one via `parentSession`, and the prompt is left in the editor as a draft. You submit it.
+5. On approval, the old session records a `handoff` audit entry, and the new session is created with the handoff committed as a visible custom message — then waits for your next instruction.
 
 The prompt ends with a `## Session History` chain, newest first, so the new session can recover full context:
 
@@ -57,10 +57,10 @@ Use `pi --session <path>` to review any session if needed.
 | Branch context | `sessionManager.buildContextEntries()` + `sessionEntryToContextMessages()`, so a compacted session hands off real context rather than only post-compaction entries. |
 | Prompt generation | `ctx.modelRegistry.complete()` with the active model, abortable via the loader's signal. |
 | Session chain | Each session file's header is read with `pi.exec('head', ['-1', file])`; ancestors are walked via `parentSession` with cycle protection. |
-| Session creation | `ctx.newSession({ parentSession, withSession })`. |
+| Session creation | `ctx.newSession({ parentSession, setup })` + `sessionManager.appendCustomMessageEntry('handoff', prompt, true, { goal })` in `setup`, so the handoff is visible in-context content before the new session renders. `withSession` only notifies. |
 
 > [!IMPORTANT]
-> Pre-replacement `ctx` is invalidated after a session switch, and operations on it throw. All session-bound UI work happens inside the `withSession` callback, using the replacement context.
+> Pre-replacement `ctx` is invalidated after a session switch, and operations on it throw. All post-switch work happens in `setup` and `withSession` using the replacement context. The new session waits for your next instruction.
 
 Errors during generation surface via `ctx.ui.notify` instead of failing silently. Cancelling the loader, the editor, or the new session aborts cleanly.
 

@@ -23,29 +23,7 @@ import {
   serializeConversation,
   sessionEntryToContextMessages,
 } from '@earendil-works/pi-coding-agent'
-import { collectSessionChain, sessionHistorySection } from './logic.js'
-
-const SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
-
-1. Summarizes relevant context from the conversation (decisions made, approaches taken, key findings)
-2. Lists any relevant files that were discussed or modified
-3. Clearly states the next task based on the user's goal
-4. Is self-contained - the new thread should be able to proceed without the old conversation
-
-Format your response as a prompt the user can send to start the new thread. Be concise but include all necessary context. Do not include any preamble like "Here's the prompt" - just output the prompt itself.
-
-Example output format:
-## Context
-We've been working on X. Key decisions:
-- Decision 1
-- Decision 2
-
-Files involved:
-- path/to/file1.ts
-- path/to/file2.ts
-
-## Task
-[Clear description of what to do next based on user's goal]`
+import { SYSTEM_PROMPT, collectSessionChain, sessionHistorySection } from './logic.js'
 
 export default function handoff(pi: ExtensionAPI): void {
   pi.registerCommand('handoff', {
@@ -161,12 +139,16 @@ export default function handoff(pi: ExtensionAPI): void {
         return
       }
 
-      // ctx is stale after the switch: install the draft from the replacement context.
+      pi.appendEntry('handoff', { goal, prompt: editedPrompt })
+
+      // ctx is stale after the switch: post-switch UI work runs in withSession.
       const newSessionResult = await ctx.newSession({
         parentSession: currentSessionFile,
+        setup: async (sessionManager) => {
+          sessionManager.appendCustomMessageEntry('handoff', editedPrompt, true, { goal })
+        },
         withSession: async (replacementCtx) => {
-          replacementCtx.ui.setEditorText(editedPrompt)
-          replacementCtx.ui.notify('Handoff ready. Submit when ready.', 'info')
+          replacementCtx.ui.notify('Handoff ready. Type your next instruction.', 'info')
         },
       })
 
