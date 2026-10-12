@@ -224,6 +224,21 @@ export function buildSessionContext(jsonl: string): SessionContextMessage[] {
   return messages
 }
 
+export function leafIdFromJsonl(jsonl: string): string | undefined {
+  const lines = jsonl
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  // Same leaf rule as buildSessionContext: the last non-header line.
+  const entries = lines.slice(1).map((line) => JSON.parse(line) as Entry)
+  const leaf = entries[entries.length - 1]
+  return typeof leaf?.id === 'string' ? leaf.id : undefined
+}
+
 export async function readSessionContext(file: string): Promise<SessionContextMessage[]> {
   return buildSessionContext(await readFile(file, 'utf8'))
+}
+
+export async function readSessionLeafId(file: string): Promise<string | undefined> {
+  return leafIdFromJsonl(await readFile(file, 'utf8'))
 }

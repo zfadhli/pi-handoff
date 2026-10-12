@@ -27,6 +27,24 @@ Files involved:
 ## Task
 [Clear description of what to do next based on user's goal]`
 
+export const SYSTEM_PROMPT_CONTEXT = `You are a context transfer assistant. Given a conversation history, generate a focused prompt that:
+
+1. Summarizes relevant context from the conversation (decisions made, approaches taken, key findings)
+2. Lists any relevant files that were discussed or modified
+3. Is self-contained - the new thread should be able to proceed without the old conversation
+
+Format your response as a prompt the user can send to start the new thread. Be concise but include all necessary context. Do not include any preamble like "Here's the prompt" - just output the prompt itself.
+
+Example output format:
+## Context
+We've been working on X. Key decisions:
+- Decision 1
+- Decision 2
+
+Files involved:
+- path/to/file1.ts
+- path/to/file2.ts`
+
 /** Current session file first, then each ancestor via its header's parentSession. */
 export async function collectSessionChain(
   currentSessionFile: string | undefined,
@@ -53,6 +71,26 @@ export function sessionHistorySection(chain: string[]): string {
 
 type NewSessionOptions = NonNullable<Parameters<ExtensionCommandContext['newSession']>[0]>
 
+/** Centralized generation-prompt builder: goal present → SYSTEM_PROMPT + goal template, else SYSTEM_PROMPT_CONTEXT + history only. */
+export function handoffGeneration({
+  goal,
+  conversationText,
+}: {
+  goal: string | undefined
+  conversationText: string
+}): { systemPrompt: string; userContent: string } {
+  if (goal !== undefined && goal.trim() !== '') {
+    return {
+      systemPrompt: SYSTEM_PROMPT,
+      userContent: `## Conversation History\n\n${conversationText}\n\n## User's Goal for New Thread\n\n${goal}`,
+    }
+  }
+  return {
+    systemPrompt: SYSTEM_PROMPT_CONTEXT,
+    userContent: `## Conversation History\n\n${conversationText}`,
+  }
+}
+
 /** Pure constructor for the object passed to `ctx.newSession(...)` after a handoff. */
 export function buildHandoffSession({
   parentSession,
@@ -60,13 +98,18 @@ export function buildHandoffSession({
   prompt,
 }: {
   parentSession: string | undefined
-  goal: string
+  goal?: string
   prompt: string
 }): NewSessionOptions {
   return {
     parentSession,
     setup: async (sessionManager) => {
-      sessionManager.appendCustomMessageEntry('handoff', prompt, true, { goal })
+      sessionManager.appendCustomMessageEntry(
+        'handoff',
+        prompt,
+        true,
+        goal === undefined || goal.trim() === '' ? {} : { goal },
+      )
     },
     withSession: async (replacementCtx) => {
       replacementCtx.ui.notify('Handoff ready. Type your next instruction.', 'info')

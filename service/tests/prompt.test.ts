@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { SYSTEM_PROMPT } from '../../logic.ts'
+import { SYSTEM_PROMPT, SYSTEM_PROMPT_CONTEXT } from '../../logic.ts'
 import type { SessionContextMessage } from '../session-context.ts'
 import { buildGenerationInput, finalizePrompt, serializeMessages } from '../prompt.ts'
 
@@ -39,6 +39,13 @@ test('buildGenerationInput matches the extension inline template', () => {
     userContent,
     "## Conversation History\n\nCONV\n\n## User's Goal for New Thread\n\nShip it",
   )
+})
+
+test('buildGenerationInput without a goal uses the context-only template', () => {
+  const { systemPrompt, userContent } = buildGenerationInput(undefined, 'CONV')
+  assert.equal(systemPrompt, SYSTEM_PROMPT_CONTEXT)
+  assert.equal(userContent, '## Conversation History\n\nCONV')
+  assert.ok(!userContent.includes("## User's Goal"))
 })
 
 test('finalizePrompt concatenates generated text and session section', () => {

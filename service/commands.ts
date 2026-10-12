@@ -7,7 +7,7 @@ import type { ConversationId } from '@earendil-works/pi-durable'
 import { collectSessionChain, sessionHistorySection } from '../logic.ts'
 import { createServiceModels, resolveModel } from './models.ts'
 import { buildGenerationInput, finalizePrompt, serializeMessages } from './prompt.ts'
-import { readSessionContext } from './session-context.ts'
+import { readSessionContext, readSessionLeafId } from './session-context.ts'
 import { HandoffStore } from './store.ts'
 
 export type CliDeps = {
@@ -17,10 +17,24 @@ export type CliDeps = {
   stderr?: (text: string) => void
 }
 
+export function handoffRequestId({
+  sessionPath,
+  leafId,
+  goal,
+}: {
+  sessionPath: string
+  leafId: string | undefined
+  goal: string
+}): string {
+  return createHash('sha256')
+    .update(`${sessionPath}\n${leafId ?? ''}\n${goal}`)
+    .digest('hex')
+}
+
 const USAGE = `Usage: pi-handoff <command> [options]
 
 Commands:
-  submit --session <file> --goal <text> [--provider <id>] [--model <id>] [--store <path>] [--detach] [--json]
+  submit --session <file> [--goal <text>] [--provider <id>] [--model <id>] [--store <path>] [--detach] [--json]
   result <conversationId> [--store <path>]
   list [--store <path>] [--json]
   resume [--store <path>]
@@ -95,13 +109,18 @@ async function runSubmit(
 ): Promise<number> {
   const { flags } = parseArgs(args)
   const sessionFile = flags.get('--session')
-  const goal = flags.get('--goal')
+  const goalFlag = flags.get('--goal')
   if (typeof sessionFile !== 'string') throw new Error('missing required flag --session <file>')
-  if (typeof goal !== 'string') throw new Error('missing required flag --goal <text>')
+  const rawGoal = typeof goalFlag === 'string' ? goalFlag : undefined
+  const goal = rawGoal !== undefined && rawGoal.trim() === '' ? undefined : rawGoal
   const resolvedSession = resolve(sessionFile)
   const transcript = serializeMessages(await readSessionContext(resolvedSession))
   const { systemPrompt, userContent } = buildGenerationInput(goal, transcript)
-  const requestId = createHash('sha256').update(`${resolvedSession}\n${goal}`).digest('hex')
+  const requestId = handoffRequestId({
+    sessionPath: resolvedSession,
+    leafId: await readSessionLeafId(resolvedSession),
+    goal: goal ?? '',
+  })
   const models = deps.models ?? createServiceModels()
   const provider = flags.get('--provider')
   const modelId = flags.get('--model')
@@ -117,7 +136,7 @@ async function runSubmit(
       content: userContent,
       instructions: systemPrompt,
       model,
-      meta: { sessionFile: resolvedSession, goal },
+      meta: { sessionFile: resolvedSession, goal: goal ?? '' },
     })
     if (flags.has('--detach')) {
       out(JSON.stringify({ id, conversationId }))
@@ -185,7 +204,8 @@ async function printList(
       out(JSON.stringify(items))
       return
     }
-    for (const item of items) out(`${item.conversationId}\t${item.status}\t${item.goal}`)
+    for (const item of items)
+      out(`${item.conversationId}\t${item.status}\t${item.goal === '' ? '(no goal)' : item.goal}`)
   } finally {
     await store.close()
   }
@@ -208,7 +228,8 @@ async function runResume(
       out(JSON.stringify(items))
       return 0
     }
-    for (const item of items) out(`${item.conversationId}\t${item.status}\t${item.goal}`)
+    for (const item of items)
+      out(`${item.conversationId}\t${item.status}\t${item.goal === '' ? '(no goal)' : item.goal}`)
     return 0
   } finally {
     await store.close()

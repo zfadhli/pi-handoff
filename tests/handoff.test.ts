@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { SessionHeader } from '@earendil-works/pi-coding-agent'
-import { buildHandoffSession, collectSessionChain, sessionHistorySection } from '../logic.ts'
+import {
+  SYSTEM_PROMPT,
+  SYSTEM_PROMPT_CONTEXT,
+  buildHandoffSession,
+  collectSessionChain,
+  handoffGeneration,
+  sessionHistorySection,
+} from '../logic.ts'
 
 test('session chain walks ancestors, newest first, and survives cycles', async () => {
   const headers: Record<string, SessionHeader | undefined> = {
@@ -110,4 +117,49 @@ test('parentSession passes through unchanged', () => {
     buildHandoffSession({ parentSession: undefined, goal: 'g', prompt: 'p' }).parentSession,
     undefined,
   )
+})
+
+test('handoffGeneration with a goal uses SYSTEM_PROMPT and the exact template', () => {
+  const { systemPrompt, userContent } = handoffGeneration({
+    goal: 'Ship it',
+    conversationText: 'CONV',
+  })
+  assert.equal(systemPrompt, SYSTEM_PROMPT)
+  assert.equal(
+    userContent,
+    "## Conversation History\n\nCONV\n\n## User's Goal for New Thread\n\nShip it",
+  )
+})
+
+test('handoffGeneration without a goal uses SYSTEM_PROMPT_CONTEXT and history only', () => {
+  for (const goal of [undefined, '   ']) {
+    const { systemPrompt, userContent } = handoffGeneration({ goal, conversationText: 'CONV' })
+    assert.equal(systemPrompt, SYSTEM_PROMPT_CONTEXT)
+    assert.equal(userContent, '## Conversation History\n\nCONV')
+    assert.ok(!userContent.includes("## User's Goal"))
+    assert.ok(!systemPrompt.includes('## Task'))
+  }
+})
+
+test('SYSTEM_PROMPT_CONTEXT has no Task block or user goal reference', () => {
+  assert.ok(!SYSTEM_PROMPT_CONTEXT.includes('## Task'))
+  assert.ok(!SYSTEM_PROMPT_CONTEXT.includes("user's goal"))
+})
+
+test('buildHandoffSession without goal appends empty details, with goal passes it through', async () => {
+  for (const [goal, expected] of [
+    [undefined, {}],
+    ['ship it', { goal: 'ship it' }],
+  ] as const) {
+    const built = buildHandoffSession({ parentSession: '/s/c.jsonl', goal, prompt: 'draft' })
+    assert.ok(built.setup)
+    const calls: unknown[][] = []
+    await built.setup({
+      appendCustomMessageEntry: (...args: unknown[]) => {
+        calls.push(args)
+        return 'entry-id'
+      },
+    } as never)
+    assert.deepEqual(calls[0], ['handoff', 'draft', true, expected])
+  }
 })

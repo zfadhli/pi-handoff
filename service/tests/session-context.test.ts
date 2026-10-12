@@ -2,7 +2,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
-import { buildSessionContext, readSessionContext } from '../session-context.ts'
+import {
+  buildSessionContext,
+  leafIdFromJsonl,
+  readSessionContext,
+  readSessionLeafId,
+} from '../session-context.ts'
 
 const fixture = (name: string): string =>
   readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')
@@ -111,4 +116,16 @@ test('branch summary is included as a message; label contributes nothing', () =>
     },
     { role: 'assistant', text: 'a' },
   ])
+})
+
+test('leafIdFromJsonl returns the id of the last entry', async () => {
+  const jsonl = fixture('basic.jsonl')
+  assert.equal(leafIdFromJsonl(jsonl), 't1')
+  assert.equal(await readSessionLeafId(fixturePath('basic.jsonl')), 't1')
+})
+
+test('leafIdFromJsonl on a header-only file returns undefined', () => {
+  const header = fixture('basic.jsonl').split('\n')[0] as string
+  assert.equal(leafIdFromJsonl(`${header}\n`), undefined)
+  assert.equal(leafIdFromJsonl(''), undefined)
 })

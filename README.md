@@ -3,10 +3,13 @@
 Transfer context from the current session into a new, focused one.
 
 ```
+/handoff
 /handoff <goal for the new thread>
 ```
 
-`/handoff` reads the active branch, summarizes what matters for the task you name, and commits the result into a fresh session as a visible custom message. Compaction is lossy; handoff is a deliberate, reviewable prompt you can edit before the next agent sees it.
+`/handoff` reads the active branch, summarizes what matters, and commits the result into a fresh session as a visible custom message. With a goal, the prompt also states the next task for that goal; without one, generation uses a context-only prompt (context, files, and the session-history footer, with no task section). Compaction is lossy; handoff is a deliberate, reviewable prompt you can edit before the next agent sees it.
+
+Without a goal, the result is context only: the editor review step is kept, and the new session waits for your next instruction.
 
 ## Install
 
@@ -33,7 +36,7 @@ Requires pi >= 1.0.0.
 
 ## Usage
 
-1. Run `/handoff` with the goal for the new thread.
+1. Run `/handoff` with an optional goal for the new thread (`/handoff [<goal for the new thread>]`).
 2. The extension reads the compaction-aware branch and serializes it.
 3. The current model streams a handoff prompt behind an abortable loader.
 4. The prompt opens in an editor overlay — edit or accept.
@@ -75,7 +78,7 @@ npm test                     # node:test unit tests for the session-chain helper
 pi -e ./index.ts             # load the extension in a live session
 ```
 
-Then run `/handoff <goal>` — this is the end-to-end check, since the extension drives a TUI editor overlay and a session switch.
+Then run `/handoff [<goal>]` — this is the end-to-end check, since the extension drives a TUI editor overlay and a session switch.
 
 Formatting is [Biome](https://biomejs.dev): 2-space indent, single quotes, semicolons as needed, 100-column width.
 

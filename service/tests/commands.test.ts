@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { createModels } from '@earendil-works/pi-ai/models'
 import { fauxAssistantMessage, fauxProvider } from '@earendil-works/pi-ai/providers/faux'
-import { runCli } from '../commands.ts'
+import { handoffRequestId, runCli } from '../commands.ts'
 
 const BASIC_LINES = [
   '{"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"Hello"}}',
@@ -55,6 +56,31 @@ async function setup() {
   const storePath = join(dir, 'handoff.sqlite')
   return { dir, storePath }
 }
+
+test('handoffRequestId is stable for the same inputs', () => {
+  const input = { sessionPath: '/s/child.jsonl', leafId: 't1', goal: 'do the thing' }
+  assert.equal(handoffRequestId(input), handoffRequestId(input))
+  assert.equal(
+    handoffRequestId(input),
+    createHash('sha256').update('/s/child.jsonl\nt1\ndo the thing').digest('hex'),
+  )
+  assert.equal(
+    handoffRequestId({ sessionPath: '/s/c.jsonl', leafId: undefined, goal: 'g' }),
+    createHash('sha256').update('/s/c.jsonl\n\ng').digest('hex'),
+  )
+})
+
+test('handoffRequestId changes when the leaf id changes', () => {
+  const before = handoffRequestId({ sessionPath: '/s/c.jsonl', leafId: 't1', goal: 'same' })
+  const after = handoffRequestId({ sessionPath: '/s/c.jsonl', leafId: 't2', goal: 'same' })
+  assert.notEqual(before, after)
+})
+
+test('handoffRequestId changes when the goal changes', () => {
+  const one = handoffRequestId({ sessionPath: '/s/c.jsonl', leafId: 't1', goal: 'one' })
+  const two = handoffRequestId({ sessionPath: '/s/c.jsonl', leafId: 't1', goal: 'two' })
+  assert.notEqual(one, two)
+})
 
 test('submit prints the generated text plus a session history section', async () => {
   const { dir, storePath } = await setup()
@@ -299,6 +325,111 @@ test('result <id> -h still executes result instead of printing help', async () =
     })
     assert.equal(code, 0)
     assert.match(cap.stdout.join('\n'), /DASH H TEXT/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('submit without --goal succeeds and prints the history footer', async () => {
+  const { dir, storePath } = await setup()
+  const { faux, models } = testModels()
+  try {
+    const parent = await writeSessionFile(dir, 'parent.jsonl')
+    const child = await writeSessionFile(dir, 'child.jsonl', parent)
+    faux.setResponses([fauxAssistantMessage('NO GOAL PROMPT')])
+    const cap = capture()
+    const code = await runCli(['submit', '--session', child, '--provider', 'faux'], {
+      models,
+      storePath,
+      ...cap.deps,
+    })
+    assert.equal(code, 0)
+    const text = cap.stdout.join('\n')
+    assert.match(text, /NO GOAL PROMPT/)
+    assert.match(text, /## Session History/)
+    assert.ok(text.includes(parent), 'history section lists the parent session file')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('whitespace-only --goal behaves like no goal', async () => {
+  const { dir, storePath } = await setup()
+  const { faux, models } = testModels()
+  try {
+    const session = await writeSessionFile(dir, 's.jsonl')
+    faux.setResponses([fauxAssistantMessage('WS GOAL PROMPT')])
+    const cap = capture()
+    const code = await runCli(
+      ['submit', '--session', session, '--goal', '   ', '--provider', 'faux'],
+      { models, storePath, ...cap.deps },
+    )
+    assert.equal(code, 0)
+    assert.match(cap.stdout.join('\n'), /WS GOAL PROMPT/)
+    const listCap = capture()
+    assert.equal(await runCli(['list', '--json'], { models, storePath, ...listCap.deps }), 0)
+    const items = JSON.parse(listCap.stdout.join('\n')) as { goal: unknown }[]
+    assert.equal(items.length, 1)
+    assert.equal(items[0]?.goal, '')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('list shows (no goal) for a no-goal submission and JSON keeps empty string', async () => {
+  const { dir, storePath } = await setup()
+  const { faux, models } = testModels()
+  try {
+    const session = await writeSessionFile(dir, 's.jsonl')
+    faux.setResponses([fauxAssistantMessage('NO GOAL LIST')])
+    const submitCap = capture()
+    assert.equal(
+      await runCli(['submit', '--session', session, '--provider', 'faux'], {
+        models,
+        storePath,
+        ...submitCap.deps,
+      }),
+      0,
+    )
+    const jsonCap = capture()
+    assert.equal(await runCli(['list', '--json'], { models, storePath, ...jsonCap.deps }), 0)
+    const items = JSON.parse(jsonCap.stdout.join('\n')) as { goal: unknown }[]
+    assert.equal(items.length, 1)
+    assert.equal(items[0]?.goal, '')
+    const humanCap = capture()
+    assert.equal(await runCli(['list'], { models, storePath, ...humanCap.deps }), 0)
+    assert.ok(humanCap.stdout.join('\n').includes('(no goal)'))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('no-goal and with-goal submissions on the same session produce different entries', async () => {
+  const { dir, storePath } = await setup()
+  const { faux, models } = testModels()
+  try {
+    const session = await writeSessionFile(dir, 's.jsonl')
+    faux.setResponses([fauxAssistantMessage('ONE'), fauxAssistantMessage('TWO')])
+    const firstCap = capture()
+    assert.equal(
+      await runCli(['submit', '--session', session, '--provider', 'faux', '--detach'], {
+        models,
+        storePath,
+        ...firstCap.deps,
+      }),
+      0,
+    )
+    const secondCap = capture()
+    assert.equal(
+      await runCli(
+        ['submit', '--session', session, '--goal', 'a goal', '--provider', 'faux', '--detach'],
+        { models, storePath, ...secondCap.deps },
+      ),
+      0,
+    )
+    const first = JSON.parse(firstCap.stdout.join('\n')) as { conversationId: unknown }
+    const second = JSON.parse(secondCap.stdout.join('\n')) as { conversationId: unknown }
+    assert.notEqual(first.conversationId, second.conversationId)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

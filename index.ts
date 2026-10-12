@@ -24,9 +24,9 @@ import {
   sessionEntryToContextMessages,
 } from '@earendil-works/pi-coding-agent'
 import {
-  SYSTEM_PROMPT,
   buildHandoffSession,
   collectSessionChain,
+  handoffGeneration,
   sessionHistorySection,
 } from './logic.js'
 
@@ -42,11 +42,7 @@ export default function handoff(pi: ExtensionAPI): void {
         ctx.ui.notify('No model selected', 'error')
         return
       }
-      const goal = args.trim()
-      if (!goal) {
-        ctx.ui.notify('Usage: /handoff <goal for new thread>', 'error')
-        return
-      }
+      const goal = args.trim() || undefined
 
       // Compaction-aware leaf path, so a compacted session still hands off real context.
       const messages = ctx.sessionManager
@@ -76,18 +72,20 @@ export default function handoff(pi: ExtensionAPI): void {
           const loader = new BorderedLoader(tui, theme, 'Generating handoff prompt...')
           loader.onAbort = () => done({ text: null })
 
+          const { systemPrompt, userContent } = handoffGeneration({ goal, conversationText })
+
           const doGenerate = async () => {
             const response = await ctx.modelRegistry.complete(
               ctx.model!,
               {
-                systemPrompt: SYSTEM_PROMPT,
+                systemPrompt,
                 messages: [
                   {
                     role: 'user',
                     content: [
                       {
                         type: 'text',
-                        text: `## Conversation History\n\n${conversationText}\n\n## User's Goal for New Thread\n\n${goal}`,
+                        text: userContent,
                       },
                     ],
                     timestamp: Date.now(),

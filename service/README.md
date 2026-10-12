@@ -1,6 +1,6 @@
 # pi-handoff service
 
-Headless, durable handoff prompt generation that survives the pi process exiting. One handoff request is one durable conversation: submit a session file plus a goal, wait for the generated prompt (or detach and collect it later), and resume pending generations after a crash. Generate-only — pi still owns review and session creation.
+Headless, durable handoff prompt generation that survives the pi process exiting. One handoff request is one durable conversation: submit a session file with an optional goal, wait for the generated prompt (or detach and collect it later), and resume pending generations after a crash. Generate-only — pi still owns review and session creation.
 
 ## Requirements
 
@@ -30,6 +30,9 @@ SQLite at `~/.pi/agent/handoff.sqlite` (override per command with `--store <path
 # Generate and wait: prints the prompt to stdout.
 node bin/pi-handoff.mjs submit --session /path/to/session.jsonl --goal "Port the auth flow to Hono"
 
+# Without a goal: context-only prompt (context, files, session-history footer, no task section).
+node bin/pi-handoff.mjs submit --session /path/to/session.jsonl
+
 # Detach: prints {"id":...,"conversationId":...} JSON, generation continues in the store.
 node bin/pi-handoff.mjs submit --session /path/to/session.jsonl --goal "Port the auth flow" --detach
 
@@ -41,6 +44,8 @@ node bin/pi-handoff.mjs result 1
 node bin/pi-handoff.mjs result 1 --store ~/handoff.sqlite
 
 # List recorded handoffs (conversationId, status, goal); --json for machine output.
+# A request with no goal shows `(no goal)` in human `list`/`resume` output; JSON keeps `""`.
+# (`result` prints the prompt text itself.)
 node bin/pi-handoff.mjs list
 node bin/pi-handoff.mjs list --store ~/handoff.sqlite --json
 
@@ -49,16 +54,16 @@ node bin/pi-handoff.mjs resume
 node bin/pi-handoff.mjs resume --store ~/handoff.sqlite
 ```
 
-Flags per command: `submit` takes `--session`, `--goal`, `--provider`, `--model`, `--store`, `--detach`, `--json`; `result` takes `--store`; `list` takes `--store`, `--json`; `resume` takes `--store`.
+Flags per command: `submit` takes `--session`, `[--goal <text>]`, `--provider`, `--model`, `--store`, `--detach`, `--json`; `result` takes `--store`; `list` takes `--store`, `--json`; `resume` takes `--store`. `--goal` is optional: omit it for a context-only prompt.
 
 Exit codes: `0` on success; `submit` exits `1` when the generation settles unanswered (reason and `detail` on stderr); `result` exits `1` for unanswered and `2` when the conversation is pending or unknown.
 
 ## How it works
 
-The session JSONL is parsed with the compaction-aware parser (`session-context.ts`): only the active branch path is kept, post-compaction entries plus the compaction summary are used, and content blocks are rendered to text the same way pi serializes conversations. The transcript and goal are assembled into a generation request from the shared `SYSTEM_PROMPT` (`../logic.ts`), and generation runs as a durable task in the SQLite-backed harness. Each conversation commits a `handoff.request` entry with the session file, goal, and timestamp, so `list` and `result` work after the store is reopened.
+The session JSONL is parsed with the compaction-aware parser (`session-context.ts`): only the active branch path is kept, post-compaction entries plus the compaction summary are used, and content blocks are rendered to text the same way pi serializes conversations. The transcript and an optional goal are assembled into a generation request from the shared prompt builder (`handoffGeneration` in `../logic.ts`): with a goal the prompt states the next task, without one it uses a context-only template. Generation runs as a durable task in the SQLite-backed harness. Each conversation commits a `handoff.request` entry with the session file, goal, and timestamp, so `list` and `result` work after the store is reopened.
 
 > [!NOTE]
-> `submit` is idempotent per session file + goal, including across restarts: resubmitting the same pair returns the existing conversation instead of generating twice (the `requestId` index lives in the durable `handoff.request` entries, and `list` pages through every conversation regardless of count).
+> `submit` is idempotent per session path + session leaf + goal, including across restarts: resubmitting the same triple returns the existing conversation instead of generating twice (the sha256 `requestId` index lives in the durable `handoff.request` entries, and `list` pages through every conversation regardless of count). Appending turns to a session changes its leaf id, so the next `submit` is a new request instead of returning a stale prompt.
 
 ## Limitations
 

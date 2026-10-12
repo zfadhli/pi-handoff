@@ -1,4 +1,4 @@
-import { SYSTEM_PROMPT } from '../logic.ts'
+import { handoffGeneration } from '../logic.ts'
 import type { SessionContextMessage } from './session-context.ts'
 
 // Mirrors pi-coding-agent@1.0.0 dist/core/compaction/utils.js serializeConversation
@@ -39,13 +39,10 @@ export function serializeMessages(messages: SessionContextMessage[]): string {
 }
 
 export function buildGenerationInput(
-  goal: string,
+  goal: string | undefined,
   conversationText: string,
 ): { systemPrompt: string; userContent: string } {
-  return {
-    systemPrompt: SYSTEM_PROMPT,
-    userContent: `## Conversation History\n\n${conversationText}\n\n## User's Goal for New Thread\n\n${goal}`,
-  }
+  return handoffGeneration({ goal, conversationText })
 }
 
 export function finalizePrompt(generated: string, sessionSection: string): string {
